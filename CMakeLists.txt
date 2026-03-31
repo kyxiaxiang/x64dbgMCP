@@ -1,31 +1,36 @@
 cmake_minimum_required(VERSION 3.15)
 project(MCPx64dbg)
 
-# Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Optionally build both 32-bit and 64-bit plugins via a superbuild
 option(BUILD_BOTH_ARCHES "Build both 32-bit and 64-bit plugins from this CMake project" ON)
+option(X64DBG_DOWNLOAD_SDK "Download x64dbg-pluginsdk.zip when debugger import libs are missing or stub-sized" OFF)
 
-# If requested and supported by MSVC, drive two sub-builds that produce dp32 and dp64
+set(X64DBG_SDK_PINNED_URL
+    "https://github.com/x64dbg/x64dbg/releases/download/2025.08.19/x64dbg-pluginsdk.zip")
+
 if(BUILD_BOTH_ARCHES AND MSVC)
     include(ExternalProject)
     message(STATUS "Configuring superbuild to produce both dp32 and dp64")
 
-    # 32-bit sub-build
     ExternalProject_Add(plugin32
         SOURCE_DIR ${CMAKE_SOURCE_DIR}
         BINARY_DIR ${CMAKE_BINARY_DIR}/build32
-        CMAKE_ARGS -G "${CMAKE_GENERATOR}" -DCMAKE_GENERATOR_PLATFORM=Win32 -DCMAKE_BUILD_TYPE=$<IF:$<CONFIG:>,${CMAKE_BUILD_TYPE},Release> -DBUILD_BOTH_ARCHES=OFF
+        CMAKE_ARGS -G "${CMAKE_GENERATOR}" -DCMAKE_GENERATOR_PLATFORM=Win32
+            -DCMAKE_BUILD_TYPE=$<IF:$<CONFIG:>,${CMAKE_BUILD_TYPE},Release>
+            -DBUILD_BOTH_ARCHES=OFF
+            -DX64DBG_DOWNLOAD_SDK=${X64DBG_DOWNLOAD_SDK}
         INSTALL_COMMAND ""
     )
 
-    # 64-bit sub-build
     ExternalProject_Add(plugin64
         SOURCE_DIR ${CMAKE_SOURCE_DIR}
         BINARY_DIR ${CMAKE_BINARY_DIR}/build64
-        CMAKE_ARGS -G "${CMAKE_GENERATOR}" -DCMAKE_GENERATOR_PLATFORM=x64 -DCMAKE_BUILD_TYPE=$<IF:$<CONFIG:>,${CMAKE_BUILD_TYPE},Release> -DBUILD_BOTH_ARCHES=OFF
+        CMAKE_ARGS -G "${CMAKE_GENERATOR}" -DCMAKE_GENERATOR_PLATFORM=x64
+            -DCMAKE_BUILD_TYPE=$<IF:$<CONFIG:>,${CMAKE_BUILD_TYPE},Release>
+            -DBUILD_BOTH_ARCHES=OFF
+            -DX64DBG_DOWNLOAD_SDK=${X64DBG_DOWNLOAD_SDK}
         INSTALL_COMMAND ""
     )
 
@@ -33,124 +38,128 @@ if(BUILD_BOTH_ARCHES AND MSVC)
 
     message(STATUS "Use 'cmake --build . --target all_plugins' to build both dp32 and dp64")
 
-    # Stop processing the single-arch build logic in superbuild mode
     return()
 endif()
 
-# Detect target architecture from the generator/toolchain (authoritative) for single-arch builds
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(PLUGIN_EXT ".dp64")
     set(ARCH_BITS 64)
     set(ARCH_SUFFIX "_x64")
+    set(X64DBG_DBG_IMPORT_LIB "x64dbg.lib")
 else()
     set(PLUGIN_EXT ".dp32")
     set(ARCH_BITS 32)
     set(ARCH_SUFFIX "_x86")
+    set(X64DBG_DBG_IMPORT_LIB "x32dbg.lib")
 endif()
 
-# deps/x64dbg_deps: git submodule -> https://github.com/x64dbg/deps (pinned; same tree x64dbg uses for x32/x64 DLLs).
-# deps/pluginsdk: NOT in submodule — extract https://github.com/x64dbg/x64dbg/releases x64dbg-pluginsdk.zip here (headers + .lib).
-# Pin binary deps to match upstream e.g.: cd deps/x64dbg_deps && git checkout 31f6cc57999d78dd5f99f59ab56e8465fbb9256f
-set(X64DBG_DEPS_PATH "${CMAKE_SOURCE_DIR}/deps/x64dbg_deps")
-set(X64DBG_SDK_PATH "${CMAKE_SOURCE_DIR}/deps")
+set(X64DBG_DEPS_DIR "${CMAKE_SOURCE_DIR}/deps")
+set(_x64dbg_psdk_zip "${CMAKE_BINARY_DIR}/x64dbg-pluginsdk.zip")
 
-if(NOT EXISTS "${X64DBG_SDK_PATH}/pluginsdk/bridgemain.h")
-    message(FATAL_ERROR
-        "Plugin SDK missing: ${X64DBG_SDK_PATH}/pluginsdk/\n"
-        "  Extract the release asset 'x64dbg-pluginsdk.zip' into 'deps/' so you have 'deps/pluginsdk/bridgemain.h'.\n"
-        "  The submodule at deps/x64dbg_deps only contains runtime DLLs, not compile-time Plugin SDK.")
+# --- Ensure full Plugin SDK (headers + import libs), not runtime stub .lib files (~2 KB). ---
+if(NOT EXISTS "${X64DBG_DEPS_DIR}/bridgemain.h")
+    if(X64DBG_DOWNLOAD_SDK)
+        message(STATUS "Downloading x64dbg Plugin SDK (headers)...")
+        file(DOWNLOAD "${X64DBG_SDK_PINNED_URL}" "${_x64dbg_psdk_zip}" SHOW_PROGRESS STATUS _dl)
+        if(NOT _dl EQUAL 0)
+            message(FATAL_ERROR "Plugin SDK download failed (status: ${_dl})")
+        endif()
+        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${_x64dbg_psdk_zip}"
+            WORKING_DIRECTORY "${X64DBG_DEPS_DIR}" RESULT_VARIABLE _ex)
+        if(NOT _ex EQUAL 0)
+            message(FATAL_ERROR "Plugin SDK extract failed (exit ${_ex})")
+        endif()
+    endif()
+    if(NOT EXISTS "${X64DBG_DEPS_DIR}/bridgemain.h")
+        message(FATAL_ERROR
+            "Plugin SDK missing: ${X64DBG_DEPS_DIR}/bridgemain.h\n"
+            "  Extract x64dbg-pluginsdk.zip into deps/, or reconfigure with -DX64DBG_DOWNLOAD_SDK=ON")
+    endif()
 endif()
 
-# Include directories
+set(_dbg_lib "${X64DBG_DEPS_DIR}/${X64DBG_DBG_IMPORT_LIB}")
+set(_need_sdk_fetch FALSE)
+if(NOT EXISTS "${_dbg_lib}")
+    set(_need_sdk_fetch TRUE)
+else()
+    file(SIZE "${_dbg_lib}" _dbg_lib_sz)
+    # Official imports are ~90–120 KB each; runtime / stub copies are only a few KB.
+    if(_dbg_lib_sz LESS 20000)
+        set(_need_sdk_fetch TRUE)
+    endif()
+endif()
+
+if(_need_sdk_fetch)
+    if(X64DBG_DOWNLOAD_SDK)
+        message(STATUS "Downloading x64dbg Plugin SDK (full ${_dbg_lib})...")
+        file(DOWNLOAD "${X64DBG_SDK_PINNED_URL}" "${_x64dbg_psdk_zip}" SHOW_PROGRESS STATUS _dl2)
+        if(NOT _dl2 EQUAL 0)
+            message(FATAL_ERROR "Plugin SDK download failed (status: ${_dl2})")
+        endif()
+        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${_x64dbg_psdk_zip}"
+            WORKING_DIRECTORY "${X64DBG_DEPS_DIR}" RESULT_VARIABLE _ex2)
+        if(NOT _ex2 EQUAL 0)
+            message(FATAL_ERROR "Plugin SDK extract failed (exit ${_ex2})")
+        endif()
+    endif()
+    if(NOT EXISTS "${_dbg_lib}")
+        message(FATAL_ERROR
+            "Missing ${_dbg_lib}\n"
+            "  Use the full x64dbg-pluginsdk.zip from a release (not runtime DLL folders).\n"
+            "  Or: cmake -S . -B build -DX64DBG_DOWNLOAD_SDK=ON")
+    endif()
+    file(SIZE "${_dbg_lib}" _dbg_lib_sz2)
+    if(_dbg_lib_sz2 LESS 20000)
+        message(FATAL_ERROR
+            "${_dbg_lib} is only ${_dbg_lib_sz2} bytes (stub). Need the real import library from\n"
+            "  x64dbg-pluginsdk.zip (~90–120 KB). Replace deps/x32dbg.lib and x64dbg.lib, or use:\n"
+            "  cmake -S . -B build -DX64DBG_DOWNLOAD_SDK=ON")
+    endif()
+endif()
+
 include_directories(
-    ${X64DBG_SDK_PATH}
-    ${X64DBG_SDK_PATH}/pluginsdk
-    ${X64DBG_SDK_PATH}/pluginsdk/nlohmann  # Add nlohmann include path
+    ${X64DBG_DEPS_DIR}
     ${CMAKE_SOURCE_DIR}/include
 )
+if(EXISTS "${X64DBG_DEPS_DIR}/nlohmann")
+    include_directories(${X64DBG_DEPS_DIR}/nlohmann)
+endif()
 
-# Add source files
 file(GLOB SOURCES "src/*.cpp")
-
-# Create shared library (plugin)
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
-# Set output name
 set_target_properties(${PROJECT_NAME} PROPERTIES
     PREFIX ""
     OUTPUT_NAME "${PROJECT_NAME}"
     SUFFIX "${PLUGIN_EXT}"
 )
 
-# Define macro for architecture
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     target_compile_definitions(${PROJECT_NAME} PRIVATE _WIN64)
 else()
     target_compile_definitions(${PROJECT_NAME} PRIVATE _WIN32)
 endif()
 
-# Add path to library files
-link_directories(${X64DBG_SDK_PATH}/pluginsdk)
-
-# Check if libraries exist and adjust architecture suffix if needed
-if(NOT EXISTS "${X64DBG_SDK_PATH}/pluginsdk/TitanEngine/TitanEngine${ARCH_SUFFIX}.lib")
-    message(STATUS "TitanEngine${ARCH_SUFFIX}.lib not found, trying TitanEngine.lib")
-    set(TITAN_ENGINE_LIB "${X64DBG_SDK_PATH}/pluginsdk/TitanEngine/TitanEngine.lib")
-else()
-    set(TITAN_ENGINE_LIB "${X64DBG_SDK_PATH}/pluginsdk/TitanEngine/TitanEngine${ARCH_SUFFIX}.lib")
-endif()
-
-if(NOT EXISTS "${X64DBG_SDK_PATH}/pluginsdk/DeviceNameResolver/DeviceNameResolver${ARCH_SUFFIX}.lib")
-    message(STATUS "DeviceNameResolver${ARCH_SUFFIX}.lib not found, trying DeviceNameResolver.lib")
-    set(DEVICE_RESOLVER_LIB "${X64DBG_SDK_PATH}/pluginsdk/DeviceNameResolver/DeviceNameResolver.lib")
-else()
-    set(DEVICE_RESOLVER_LIB "${X64DBG_SDK_PATH}/pluginsdk/DeviceNameResolver/DeviceNameResolver${ARCH_SUFFIX}.lib")
-endif()
-
-if(NOT EXISTS "${X64DBG_SDK_PATH}/pluginsdk/jansson/jansson${ARCH_SUFFIX}.lib")
-    message(STATUS "jansson${ARCH_SUFFIX}.lib not found, trying jansson.lib")
-    set(JANSSON_LIB "${X64DBG_SDK_PATH}/pluginsdk/jansson/jansson.lib")
-else()
-    set(JANSSON_LIB "${X64DBG_SDK_PATH}/pluginsdk/jansson/jansson${ARCH_SUFFIX}.lib")
-endif()
-
-if(NOT EXISTS "${X64DBG_SDK_PATH}/pluginsdk/lz4/lz4${ARCH_SUFFIX}.lib")
-    message(STATUS "lz4${ARCH_SUFFIX}.lib not found, trying lz4.lib")
-    set(LZ4_LIB "${X64DBG_SDK_PATH}/pluginsdk/lz4/lz4.lib")
-else()
-    set(LZ4_LIB "${X64DBG_SDK_PATH}/pluginsdk/lz4/lz4${ARCH_SUFFIX}.lib")
-endif()
-
-if(NOT EXISTS "${X64DBG_SDK_PATH}/pluginsdk/XEDParse/XEDParse${ARCH_SUFFIX}.lib")
-    message(STATUS "XEDParse${ARCH_SUFFIX}.lib not found, trying XEDParse.lib")
-    set(XEDPARSE_LIB "${X64DBG_SDK_PATH}/pluginsdk/XEDParse/XEDParse.lib")
-else()
-    set(XEDPARSE_LIB "${X64DBG_SDK_PATH}/pluginsdk/XEDParse/XEDParse${ARCH_SUFFIX}.lib")
-endif()
-
-# Link x64dbg libraries and dependencies
-target_link_libraries(${PROJECT_NAME}
-        ws2_32                         # For winsock2
-        winhttp                        # WinHTTP library
-        ${TITAN_ENGINE_LIB}
-        ${DEVICE_RESOLVER_LIB}
-        ${JANSSON_LIB}
-        ${LZ4_LIB}
-        ${XEDPARSE_LIB}
-)
-
-if (CMAKE_SIZEOF_VOID_P EQUAL 4)
-    target_link_libraries(${PROJECT_NAME}
-            ${X64DBG_SDK_PATH}/pluginsdk/x32dbg.lib
-            ${X64DBG_SDK_PATH}/pluginsdk/x32bridge.lib
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    file(GLOB_RECURSE X64DBG_SDK_IMPORT_LIBS CONFIGURE_DEPENDS
+        "${X64DBG_DEPS_DIR}/*_x64.lib"
+        "${X64DBG_DEPS_DIR}/x64*.lib"
     )
-elseif (CMAKE_SIZEOF_VOID_P EQUAL 8)
-    target_link_libraries(${PROJECT_NAME}
-            ${X64DBG_SDK_PATH}/pluginsdk/x64dbg.lib
-            ${X64DBG_SDK_PATH}/pluginsdk/x64bridge.lib
+else()
+    file(GLOB_RECURSE X64DBG_SDK_IMPORT_LIBS CONFIGURE_DEPENDS
+        "${X64DBG_DEPS_DIR}/*_x86.lib"
+        "${X64DBG_DEPS_DIR}/x32*.lib"
     )
 endif()
-# Just show information about where the plugin is built
+if(NOT X64DBG_SDK_IMPORT_LIBS)
+    message(FATAL_ERROR
+        "No SDK .lib files matched for this architecture under ${X64DBG_DEPS_DIR}\n"
+        "  Re-extract x64dbg-pluginsdk.zip or use -DX64DBG_DOWNLOAD_SDK=ON")
+endif()
+
+target_link_directories(${PROJECT_NAME} PRIVATE ${X64DBG_DEPS_DIR})
+target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 winhttp ${X64DBG_SDK_IMPORT_LIBS})
+
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo ""
     COMMAND ${CMAKE_COMMAND} -E echo "=== Plugin build complete ==="

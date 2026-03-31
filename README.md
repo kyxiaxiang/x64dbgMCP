@@ -20,11 +20,7 @@
 - **API Compatibility** - Runable from cmd using the args given in the python file.
 <br><br>
 
-<b>Latest Features</b>(2/2026): 
-- Symbol parsing by Module with pagination
-- Thread management features 
-- Xrefs by addr and string
-- Removed log redirection upon the discovery of the GuiReferenceGetRowCount & GuiReferenceGetCellContent, with pagination.
+
 <h2> Quick Setup in 3 Steps </h2>
 
  1.  **Download Plugin**
@@ -54,12 +50,13 @@
    - Check plugin loaded successfully (ALT+L in x64dbg for logs)
 <br>
 
-<h2> Build from Source </h2>
+<h2> Build from Source for Latest Features! </h2>
+** CMake and MSVC should be installed and on PATH  **\
 
-- git clone --recurse-submodules https://github.com/wasdubya/x64dbgmcp
+- git clone https://github.com/wasdubya/x64dbgmcp
 - cd x64dbgmcp
-- cmake -S . -B build
-- cmake --build build --target all_plugins --config Release
+- cmake -S . -B build     (will resolve the pluginsdk automatically so no need to worry about dependencies.)
+- cmake --build build --target all_plugins --config Release     (will build both 32 and 64 bit versions of the plugin)
 
 **TIP**
 

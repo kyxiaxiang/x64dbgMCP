@@ -2,7 +2,7 @@ import sys
 import os
 import inspect
 import json
-from typing import Any, Dict, List, Callable
+from typing import Any, Callable, Dict, List, Optional
 import requests
 
 from mcp.server.fastmcp import FastMCP
@@ -600,23 +600,61 @@ def StepInWithDisasm() -> dict:
     return {"error": "Unexpected response format"}
 
 
+def _parse_module_list_payload(result: Any) -> Optional[List[Dict[str, Any]]]:
+    """Normalize HTTP/MCP payloads into a list of module dicts."""
+    if isinstance(result, list):
+        return [m for m in result if isinstance(m, dict)]
+    if isinstance(result, str):
+        try:
+            data = json.loads(result)
+            return [m for m in data if isinstance(m, dict)] if isinstance(data, list) else None
+        except json.JSONDecodeError:
+            return None
+    if isinstance(result, dict):
+        if "raw" in result and isinstance(result["raw"], str):
+            try:
+                data = json.loads(result["raw"])
+                if isinstance(data, list):
+                    return [m for m in data if isinstance(m, dict)]
+            except json.JSONDecodeError:
+                pass
+        if "modules" in result and isinstance(result["modules"], list):
+            return [m for m in result["modules"] if isinstance(m, dict)]
+    return None
+
+
 @mcp.tool()
-def GetModuleList() -> list:
+def GetModuleList() -> dict:
     """
-    Get list of loaded modules
-    
+    Get list of loaded modules.
+
     Returns:
-        List of module information (name, base address, size, etc.)
+        Dictionary with count, modules (list of objects), and summary (human-readable lines).
     """
     result = safe_get("GetModuleList")
-    if isinstance(result, list):
-        return result
-    elif isinstance(result, str):
-        try:
-            return json.loads(result)
-        except:
-            return [{"raw": result}]
-    return [{"error": "Unexpected response format"}]
+    modules = _parse_module_list_payload(result)
+    if not modules:
+        return {
+            "error": "Failed to get or parse module list",
+            "detail": str(result)[:2000] if result is not None else None,
+        }
+
+    lines: List[str] = []
+    for m in modules:
+        name = m.get("name", "?")
+        base = m.get("base", "")
+        size = m.get("size", "")
+        entry = m.get("entry", "")
+        path = m.get("path", "")
+        lines.append(f"{name:<40} base={base:<14} size={size:<14} entry={entry}")
+        if path:
+            lines.append(f"  path: {path}")
+
+    return {
+        "count": len(modules),
+        "modules": modules,
+        "summary": "\n".join(lines),
+    }
 
 @mcp.tool()
 def QuerySymbols(module: str, offset: int = 0, limit: int = 5000) -> dict:

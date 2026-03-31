@@ -2,24 +2,24 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include <Windows.h>
-#include "pluginsdk/bridgemain.h"
-#include "pluginsdk/_plugins.h"
-#include "pluginsdk/_scriptapi_module.h"
-#include "pluginsdk/_scriptapi_memory.h"
-#include "pluginsdk/_scriptapi_register.h"
-#include "pluginsdk/_scriptapi_debug.h"
-#include "pluginsdk/_scriptapi_assembler.h"
-#include "pluginsdk/_scriptapi_comment.h"
-#include "pluginsdk/_scriptapi_label.h"
-#include "pluginsdk/_scriptapi_bookmark.h"
-#include "pluginsdk/_scriptapi_function.h"
-#include "pluginsdk/_scriptapi_argument.h"
-#include "pluginsdk/_scriptapi_symbol.h"
-#include "pluginsdk/_scriptapi_stack.h"
-#include "pluginsdk/_scriptapi_pattern.h"
-#include "pluginsdk/_scriptapi_flag.h"
-#include "pluginsdk/_scriptapi_gui.h"
-#include "pluginsdk/_scriptapi_misc.h"
+#include "bridgemain.h"
+#include "_plugins.h"
+#include "_scriptapi_module.h"
+#include "_scriptapi_memory.h"
+#include "_scriptapi_register.h"
+#include "_scriptapi_debug.h"
+#include "_scriptapi_assembler.h"
+#include "_scriptapi_comment.h"
+#include "_scriptapi_label.h"
+#include "_scriptapi_bookmark.h"
+#include "_scriptapi_function.h"
+#include "_scriptapi_argument.h"
+#include "_scriptapi_symbol.h"
+#include "_scriptapi_stack.h"
+#include "_scriptapi_pattern.h"
+#include "_scriptapi_flag.h"
+#include "_scriptapi_gui.h"
+#include "_scriptapi_misc.h"
 #include <iomanip>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -33,12 +33,6 @@
 #include <cstdio>
 
 #pragma comment(lib, "ws2_32.lib")
-
-#ifdef _WIN64
-#pragma comment(lib, "x64dbg.lib")
-#else
-#pragma comment(lib, "x32dbg.lib")
-#endif
 
 #ifdef _WIN64
 #define FMT_DUINT_HEX "0x%llx"
@@ -1083,12 +1077,12 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                             
                             // Add module info as JSON object
                             jsonResponse << "{";
-                            jsonResponse << "\"name\":\"" << modules[i].name << "\",";
+                            jsonResponse << "\"name\":\"" << escapeJsonString(modules[i].name) << "\",";
                             jsonResponse << "\"base\":\"0x" << std::hex << modules[i].base << "\",";
                             jsonResponse << "\"size\":\"0x" << std::hex << modules[i].size << "\",";
                             jsonResponse << "\"entry\":\"0x" << std::hex << modules[i].entry << "\",";
                             jsonResponse << "\"sectionCount\":" << std::dec << modules[i].sectionCount << ",";
-                            jsonResponse << "\"path\":\"" << modules[i].path << "\"";
+                            jsonResponse << "\"path\":\"" << escapeJsonString(modules[i].path) << "\"";
                             jsonResponse << "}";
                         }
                         
@@ -1782,7 +1776,7 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                     sendHttpResponse(clientSocket, 200, "application/json", ss.str());
                 }
                 else if (path == "/RegisterDump") {
-                    REGDUMP regdump;
+                    REGDUMP_AVX512 regdump;
                     memset(&regdump, 0, sizeof(regdump));
                     bool success = DbgGetRegDumpEx(&regdump, sizeof(regdump));
                     
@@ -1793,6 +1787,10 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                     }
                     
                     std::stringstream ss;
+                    const ULONG_PTR rflags = regdump.regcontext.eflags;
+                    const auto rflag = [rflags](unsigned bit) {
+                        return ((rflags >> bit) & 1) != 0;
+                    };
                     ss << "{";
                     
                     // General purpose registers
@@ -1833,24 +1831,22 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                        << "\"dr6\":\"0x" << std::hex << regdump.regcontext.dr6 << "\","
                        << "\"dr7\":\"0x" << std::hex << regdump.regcontext.dr7 << "\","
                     
-                    // Flags
+                    // RFLAGS condition codes (REGDUMP_AVX512 has no separate FLAGS; decode from eflags)
                        << "\"flags\":{"
-                       << "\"ZF\":" << (regdump.flags.z ? "true" : "false") << ","
-                       << "\"OF\":" << (regdump.flags.o ? "true" : "false") << ","
-                       << "\"CF\":" << (regdump.flags.c ? "true" : "false") << ","
-                       << "\"PF\":" << (regdump.flags.p ? "true" : "false") << ","
-                       << "\"SF\":" << (regdump.flags.s ? "true" : "false") << ","
-                       << "\"TF\":" << (regdump.flags.t ? "true" : "false") << ","
-                       << "\"AF\":" << (regdump.flags.a ? "true" : "false") << ","
-                       << "\"DF\":" << (regdump.flags.d ? "true" : "false") << ","
-                       << "\"IF\":" << (regdump.flags.i ? "true" : "false")
+                       << "\"ZF\":" << (rflag(6) ? "true" : "false") << ","
+                       << "\"OF\":" << (rflag(11) ? "true" : "false") << ","
+                       << "\"CF\":" << (rflag(0) ? "true" : "false") << ","
+                       << "\"PF\":" << (rflag(2) ? "true" : "false") << ","
+                       << "\"SF\":" << (rflag(7) ? "true" : "false") << ","
+                       << "\"TF\":" << (rflag(8) ? "true" : "false") << ","
+                       << "\"AF\":" << (rflag(4) ? "true" : "false") << ","
+                       << "\"DF\":" << (rflag(10) ? "true" : "false") << ","
+                       << "\"IF\":" << (rflag(9) ? "true" : "false")
                        << "},"
                     
-                    // Last error/status
-                       << "\"lastError\":{\"code\":" << std::dec << regdump.lastError.code << ","
-                       << "\"name\":\"" << escapeJsonString(regdump.lastError.name) << "\"},"
-                       << "\"lastStatus\":{\"code\":" << std::dec << regdump.lastStatus.code << ","
-                       << "\"name\":\"" << escapeJsonString(regdump.lastStatus.name) << "\"}"
+                    // Last error/status (codes only in REGDUMP_AVX512)
+                       << "\"lastError\":{\"code\":" << std::dec << regdump.lastError << ",\"name\":\"\"},"
+                       << "\"lastStatus\":{\"code\":" << std::dec << regdump.lastStatus << ",\"name\":\"\"}"
                        << "}";
                     
                     sendHttpResponse(clientSocket, 200, "application/json", ss.str());
