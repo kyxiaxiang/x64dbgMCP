@@ -48,8 +48,18 @@ else()
     set(ARCH_SUFFIX "_x86")
 endif()
 
-# Set paths to x64dbg SDK
-set(X64DBG_SDK_PATH "${CMAKE_SOURCE_DIR}/deps/x64dbg_sdk")
+# deps/x64dbg_deps: git submodule -> https://github.com/x64dbg/deps (pinned; same tree x64dbg uses for x32/x64 DLLs).
+# deps/pluginsdk: NOT in submodule — extract https://github.com/x64dbg/x64dbg/releases x64dbg-pluginsdk.zip here (headers + .lib).
+# Pin binary deps to match upstream e.g.: cd deps/x64dbg_deps && git checkout 31f6cc57999d78dd5f99f59ab56e8465fbb9256f
+set(X64DBG_DEPS_PATH "${CMAKE_SOURCE_DIR}/deps/x64dbg_deps")
+set(X64DBG_SDK_PATH "${CMAKE_SOURCE_DIR}/deps")
+
+if(NOT EXISTS "${X64DBG_SDK_PATH}/pluginsdk/bridgemain.h")
+    message(FATAL_ERROR
+        "Plugin SDK missing: ${X64DBG_SDK_PATH}/pluginsdk/\n"
+        "  Extract the release asset 'x64dbg-pluginsdk.zip' into 'deps/' so you have 'deps/pluginsdk/bridgemain.h'.\n"
+        "  The submodule at deps/x64dbg_deps only contains runtime DLLs, not compile-time Plugin SDK.")
+endif()
 
 # Include directories
 include_directories(
