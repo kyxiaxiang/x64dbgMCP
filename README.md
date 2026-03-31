@@ -13,7 +13,7 @@
 </p>
 
 <div align="center"> An MCP server that can bridge various LLMS (Claude and Cursor tested) with the x64dbg debugger, providing direct access to debugging applications through prompts. </div>
-<h2 align="center"> <b>Features</b> </h2>
+<h2 align="center"> <b>Features (Build from Source for Latest)</b> </h2>
 
 - **40+ x64dbg SDK Tools** - Provides access to almost every single debugging feature given by the SDK for smart debugging. 
 - **Cross-Architecture Support** - Works with both x64dbg and x32dbg.
