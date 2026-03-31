@@ -56,7 +56,7 @@
 
 <h2> Build from Source </h2>
 
-- git clone [repository-url]
+- git clone --recurse-submodules https://github.com/wasdubya/x64dbgmcp
 - cd x64dbgmcp
 - cmake -S . -B build
 - cmake --build build --target all_plugins --config Release

@@ -1,0 +1,5 @@
+[submodule "deps/x64dbg_sdk"]
+	path = deps/x64dbg_sdk
+	url = https://github.com/x64dbg/x64dbg.git
+	branch = development
+	shallow = true

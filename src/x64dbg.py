@@ -174,8 +174,10 @@ def _block_to_dict(block: Any) -> Dict[str, Any]:
 def ExecCommand(cmd: str, offset: int = 0, limit: int = 100) -> dict:
     """
     Execute a command in x64dbg and return its output
+
+    Ensure that if if the command has arguments, you comma separate the values, but not the command itself I.E. findallmem findallmem 0x140001000,CC,20480 
     
-    Parameters:
+    Parameters for commands that use the Reference View:
         cmd: Command to execute
         offset: Pagination offset for reference view results (default: 0)
         limit: Maximum number of reference view rows to return (default: 100, max: 5000)
@@ -530,15 +532,16 @@ def PatternFindMem(start: str, size: str, pattern: str) -> str:
 @mcp.tool()
 def MiscParseExpression(expression: str) -> str:
     """
-    Parse expression using Script API
-    
+    Parse expression using Script API (numeric / duint result only NO STRINGS).
+
     Parameters:
-        expression: Expression to parse (e.g. "[esp+8]")
-    
+        expression: Expression to parse (e.g. "[rsp+8]" or "cip")
+
     Returns:
         Parsed value in hex format
     """
     return safe_get("Misc/ParseExpression", {"expression": expression})
+
 
 @mcp.tool()
 def MiscRemoteGetProcAddress(module: str, api: str) -> str:

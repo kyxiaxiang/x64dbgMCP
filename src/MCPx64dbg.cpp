@@ -1,9 +1,7 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 
-// Include Windows headers before socket headers
 #include <Windows.h>
-// Include x64dbg SDK
 #include "pluginsdk/bridgemain.h"
 #include "pluginsdk/_plugins.h"
 #include "pluginsdk/_scriptapi_module.h"
@@ -22,34 +20,26 @@
 #include "pluginsdk/_scriptapi_flag.h"
 #include "pluginsdk/_scriptapi_gui.h"
 #include "pluginsdk/_scriptapi_misc.h"
-#include <iomanip>  // For std::setw and std::setfill
-
-// Socket includes - after Windows.h
+#include <iomanip>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-
-// Standard library includes
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <sstream>
 #include <mutex>
-#include <thread>
 #include <algorithm>
-#include <memory>
-#include <fstream>
 #include <cctype>
-// Link with ws2_32.lib
+#include <cstdio>
+
 #pragma comment(lib, "ws2_32.lib")
 
-// Link against correct x64dbg library depending on architecture
 #ifdef _WIN64
 #pragma comment(lib, "x64dbg.lib")
 #else
 #pragma comment(lib, "x32dbg.lib")
 #endif
 
-// Architecture-aware formatting and register macros
 #ifdef _WIN64
 #define FMT_DUINT_HEX "0x%llx"
 #define FMT_DUINT_DEC "%llu"
@@ -64,15 +54,11 @@
 #define REG_IP Script::Register::EIP
 #endif
 
-// Plugin information
 #define PLUGIN_NAME "x64dbg HTTP Server"
 #define PLUGIN_VERSION 1
-
-// Default settings
 #define DEFAULT_PORT 8888
 #define MAX_REQUEST_SIZE 8192
 
-// Global variables
 int g_pluginHandle;
 HANDLE g_httpServerThread = NULL;
 bool g_httpServerRunning = false;
@@ -80,21 +66,6 @@ int g_httpPort = DEFAULT_PORT;
 std::mutex g_httpMutex;
 SOCKET g_serverSocket = INVALID_SOCKET;
 
-static int getFlagBitIndex(const std::string& flagName)
-{
-    if(flagName == "zf") return 6;
-    if(flagName == "of") return 11;
-    if(flagName == "cf") return 0;
-    if(flagName == "pf") return 2;
-    if(flagName == "sf") return 7;
-    if(flagName == "tf") return 8;
-    if(flagName == "af") return 4;
-    if(flagName == "df") return 10;
-    if(flagName == "if") return 9;
-    return -1;
-}
-
-// Forward declarations
 bool startHttpServer();
 void stopHttpServer();
 DWORD WINAPI HttpServerThread(LPVOID lpParam);
@@ -105,7 +76,6 @@ std::unordered_map<std::string, std::string> parseQueryParams(const std::string&
 std::string urlDecode(const std::string& str);
 std::string escapeJsonString(const char* str);
 
-// Command callback declarations
 bool cbEnableHttpServer(int argc, char* argv[]);
 bool cbSetHttpPort(int argc, char* argv[]);
 void registerCommands();
@@ -117,11 +87,7 @@ bool pluginInit(PLUG_INITSTRUCT* initStruct) {
     g_pluginHandle = initStruct->pluginHandle;
     
     _plugin_logputs("x64dbg HTTP Server plugin loading...");
-    
-    // Register commands
     registerCommands();
-
-    // Start the HTTP server
     if (startHttpServer()) {
         _plugin_logprintf("x64dbg HTTP Server started on port %d\n", g_httpPort);
     } else {
@@ -132,19 +98,16 @@ bool pluginInit(PLUG_INITSTRUCT* initStruct) {
     return true;
 }
 
-// Stop the plugin
 void pluginStop() {
     _plugin_logputs("Stopping x64dbg HTTP Server...");
     stopHttpServer();
     _plugin_logputs("x64dbg HTTP Server stopped.");
 }
 
-// Plugin setup
 bool pluginSetup() {
     return true;
 }
 
-// Plugin exports
 extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
     return pluginInit(initStruct);
 }
@@ -159,13 +122,9 @@ extern "C" __declspec(dllexport) void plugsetup(PLUG_SETUPSTRUCT* setupStruct) {
 
 bool startHttpServer() {
     std::lock_guard<std::mutex> lock(g_httpMutex);
-    
-    // Stop existing server if running
     if (g_httpServerRunning) {
         stopHttpServer();
     }
-    
-    // Create and start the server thread
     g_httpServerThread = CreateThread(NULL, 0, HttpServerThread, NULL, 0, NULL);
     if (g_httpServerThread == NULL) {
         _plugin_logputs("Failed to create HTTP server thread");
@@ -176,20 +135,14 @@ bool startHttpServer() {
     return true;
 }
 
-// Stop the HTTP server
 void stopHttpServer() {
     std::lock_guard<std::mutex> lock(g_httpMutex);
-    
     if (g_httpServerRunning) {
         g_httpServerRunning = false;
-        
-        // Close the server socket to unblock any accept calls
         if (g_serverSocket != INVALID_SOCKET) {
             closesocket(g_serverSocket);
             g_serverSocket = INVALID_SOCKET;
         }
-        
-        // Wait for the thread to exit
         if (g_httpServerThread != NULL) {
             WaitForSingleObject(g_httpServerThread, 1000);
             CloseHandle(g_httpServerThread);
@@ -198,7 +151,6 @@ void stopHttpServer() {
     }
 }
 
-// URL decode function
 std::string urlDecode(const std::string& str) {
     std::string decoded;
     for (size_t i = 0; i < str.length(); ++i) {
@@ -220,7 +172,17 @@ std::string urlDecode(const std::string& str) {
     return decoded;
 }
 
-// Escape a string for safe inclusion in a JSON string value
+static void trimParam(std::string& s) {
+    const char* ws = " \t\r\n\v\f";
+    const auto first = s.find_first_not_of(ws);
+    if (first == std::string::npos) {
+        s.clear();
+        return;
+    }
+    const auto last = s.find_last_not_of(ws);
+    s = s.substr(first, last - first + 1u);
+}
+
 std::string escapeJsonString(const char* str) {
     std::string result;
     if (!str) return result;
@@ -248,7 +210,6 @@ std::string escapeJsonString(const char* str) {
     return result;
 }
 
-// HTTP server thread function using standard Winsock
 DWORD WINAPI HttpServerThread(LPVOID lpParam) {
     WSADATA wsaData;
     int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -256,30 +217,22 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
         _plugin_logprintf("WSAStartup failed with error: %d\n", result);
         return 1;
     }
-    
-    // Create a socket for the server
     g_serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (g_serverSocket == INVALID_SOCKET) {
         _plugin_logprintf("Failed to create socket, error: %d\n", WSAGetLastError());
         WSACleanup();
         return 1;
     }
-    
-    // Setup the server address structure
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // localhost only
+    serverAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     serverAddr.sin_port = htons((u_short)g_httpPort);
-    
-    // Bind the socket
     if (bind(g_serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
         _plugin_logprintf("Bind failed with error: %d\n", WSAGetLastError());
         closesocket(g_serverSocket);
         WSACleanup();
         return 1;
     }
-    
-    // Listen for incoming connections
     if (listen(g_serverSocket, SOMAXCONN) == SOCKET_ERROR) {
         _plugin_logprintf("Listen failed with error: %d\n", WSAGetLastError());
         closesocket(g_serverSocket);
@@ -288,80 +241,46 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
     }
     
     _plugin_logprintf("HTTP server started at http://localhost:%d/\n", g_httpPort);
-    
-    // Set socket to non-blocking mode
     u_long mode = 1;
     ioctlsocket(g_serverSocket, FIONBIO, &mode);
-    
-    // Main server loop
     while (g_httpServerRunning) {
-        // Accept a client connection
         sockaddr_in clientAddr;
         int clientAddrSize = sizeof(clientAddr);
         SOCKET clientSocket = accept(g_serverSocket, (sockaddr*)&clientAddr, &clientAddrSize);
         
         if (clientSocket == INVALID_SOCKET) {
-            // Check if we need to exit
             if (!g_httpServerRunning) {
                 break;
             }
-            
-            // Non-blocking socket may return WOULD_BLOCK when no connections are pending
             if (WSAGetLastError() != WSAEWOULDBLOCK) {
                 _plugin_logprintf("Accept failed with error: %d\n", WSAGetLastError());
             }
-            
-            Sleep(100); // Avoid tight loop
+            Sleep(100);
             continue;
         }
-        
-        // Read the HTTP request
         std::string requestData = readHttpRequest(clientSocket);
-        
         if (!requestData.empty()) {
-            // Parse the HTTP request
             std::string method, path, query, body;
             parseHttpRequest(requestData, method, path, query, body);
-            
-            _plugin_logprintf("HTTP Request: %s %s\n", method.c_str(), path.c_str());
-            
-            // Parse query parameters
             std::unordered_map<std::string, std::string> queryParams = parseQueryParams(query);
-            
-            // Handle different endpoints
             try {
-                // Unified command execution endpoint
                 if (path == "/ExecCommand") {
                     std::string cmd = queryParams["cmd"];
                     if (cmd.empty() && !body.empty()) {
                         cmd = body;
-                    }
-                     else {
-                        cmd = urlDecode(cmd);  
+                    } else {
+                        cmd = urlDecode(cmd);
                     }
                     
                     if (cmd.empty()) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Missing command parameter");
                         continue;
                     }
-                    
-                    // Snapshot the references tab row count before the command
                     int refRowCountBefore = GuiReferenceGetRowCount();
-
-                    // Execute the command synchronously
                     bool success = DbgCmdExecDirect(cmd.c_str());
-
-                    // Check if the references tab changed (command populated it fresh)
                     int refRowCountAfter = GuiReferenceGetRowCount();
                     bool refChanged = (refRowCountAfter != refRowCountBefore);
-
-                    // If row counts match, do a quick content check on the first row
-                    // to detect cases where a new search returned the same number of rows
                     if (!refChanged && refRowCountAfter > 0) {
-                        // We can't perfectly detect this without storing old content,
-                        // but a count change covers the vast majority of cases.
-                        // As a heuristic: if the command starts with a known ref-producing
-                        // keyword, assume it changed.
                         std::string cmdLower = cmd;
                         std::transform(cmdLower.begin(), cmdLower.end(), cmdLower.begin(), ::tolower);
                         if (cmdLower.find("refstr") == 0 ||
@@ -376,10 +295,8 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                             refChanged = true;
                         }
                     }
-
-                    // Pagination parameters for reference view results
                     int refOffset = 0;
-                    int refLimit = 100;  // default page size
+                    int refLimit = 100;
                     if (!queryParams["offset"].empty()) {
                         try { refOffset = std::stoi(queryParams["offset"]); } catch (...) {}
                         if (refOffset < 0) refOffset = 0;
@@ -389,8 +306,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                         if (refLimit < 1) refLimit = 1;
                         if (refLimit > 5000) refLimit = 5000;
                     }
-
-                    // If the command failed, return a simple error without refView data
                     if (!success) {
                         std::stringstream ss;
                         ss << "{\"success\":false,\"refView\":{\"rowCount\":0,\"rows\":[]}}";
@@ -406,12 +321,9 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                         ss << "\"rows\":[";
 
                         if (totalRows > 0) {
-                            // Clamp offset/limit to actual data range
                             if (refOffset >= totalRows) refOffset = totalRows;
                             int endRow = refOffset + refLimit;
                             if (endRow > totalRows) endRow = totalRows;
-
-                            // Determine column count by probing the first row (up to 10 columns)
                             int numCols = 0;
                             for (int c = 0; c < 10; c++) {
                                 char* cell = GuiReferenceGetCellContent(0, c);
@@ -447,7 +359,7 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                         sendHttpResponse(clientSocket, 200, "application/json", ss.str());
                     }
                 }
-                                else if (path == "/IsDebugActive") {
+                else if (path == "/IsDebugActive") {
                     bool isRunning = DbgIsRunning();
                     _plugin_logprintf("DbgIsRunning() called, result: %s\n", isRunning ? "true" : "false");
                     std::stringstream ss;
@@ -456,7 +368,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                 }
                 else if (path == "/Is_Debugging") {
                     bool isDebugging = DbgIsDebugging();
-                    _plugin_logprintf("DbgIsDebugging() called, result: %s\n", isDebugging ? "true" : "false");
                     std::stringstream ss;
                     ss << "{\"isDebugging\":" << (isDebugging ? "true" : "false") << "}";
                     sendHttpResponse(clientSocket, 200, "application/json", ss.str());
@@ -467,8 +378,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Missing register parameter");
                         continue;
                     }
-                    
-                    // Convert register name to enum (simplified mapping)
                     Script::Register::RegisterEnum reg;
                     if (regName == "EAX" || regName == "eax") reg = Script::Register::EAX;
                     else if (regName == "EBX" || regName == "ebx") reg = Script::Register::EBX;
@@ -492,7 +401,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
 #ifdef _WIN64
                         reg = Script::Register::RIP;
 #else
-                        // On x86, map RIP queries to EIP for compatibility
                         reg = Script::Register::EIP;
 #endif
                     }
@@ -522,8 +430,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Missing register or value parameter");
                         continue;
                     }
-                    
-                    // Convert register name to enum (same mapping as above)
                     Script::Register::RegisterEnum reg;
                     if (regName == "EAX" || regName == "eax") reg = Script::Register::EAX;
                     else if (regName == "EBX" || regName == "ebx") reg = Script::Register::EBX;
@@ -895,39 +801,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                     ss << "0x" << std::hex << value;
                     sendHttpResponse(clientSocket, 200, "text/plain", ss.str());
                 }
-                else if (path == "/Disasm/GetInstruction") {
-                    std::string addrStr = queryParams["addr"];
-                    if (addrStr.empty()) {
-                        sendHttpResponse(clientSocket, 400, "text/plain", "Missing address parameter");
-                        continue;
-                    }
-                    
-                    duint addr = 0;
-                    try {
-                        if (addrStr.substr(0, 2) == "0x") {
-                            addr = std::stoull(addrStr.substr(2), nullptr, 16);
-                        } else {
-                            addr = std::stoull(addrStr, nullptr, 16);
-                        }
-                    } catch (const std::exception& e) {
-                        sendHttpResponse(clientSocket, 400, "text/plain", "Invalid address format");
-                        continue;
-                    }
-                    
-                    // Use the correct DISASM_INSTR structure
-                    DISASM_INSTR instr;
-                    DbgDisasmAt(addr, &instr);
-                    
-                    // Create JSON response with available instruction details
-                    std::stringstream ss;
-                    ss << "{";
-                    ss << "\"address\":\"0x" << std::hex << addr << "\",";
-                    ss << "\"instruction\":\"" << instr.instruction << "\",";
-                    ss << "\"size\":" << std::dec << instr.instr_size;
-                    ss << "}";
-                    
-                    sendHttpResponse(clientSocket, 200, "application/json", ss.str());
-                }
                 else if (path == "/Disasm/GetInstructionRange") {
                     std::string addrStr = queryParams["addr"];
                     std::string countStr = queryParams["count"];
@@ -1014,15 +887,20 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Missing flag parameter");
                         continue;
                     }
-                    std::string flagLower = flagName;
-                    std::transform(flagLower.begin(), flagLower.end(), flagLower.begin(), ::tolower);
-                    int bit = getFlagBitIndex(flagLower);
-                    if (bit < 0) {
+                    bool val = false;
+                    if (flagName == "ZF" || flagName == "zf") val = Script::Flag::GetZF();
+                    else if (flagName == "OF" || flagName == "of") val = Script::Flag::GetOF();
+                    else if (flagName == "CF" || flagName == "cf") val = Script::Flag::GetCF();
+                    else if (flagName == "PF" || flagName == "pf") val = Script::Flag::GetPF();
+                    else if (flagName == "SF" || flagName == "sf") val = Script::Flag::GetSF();
+                    else if (flagName == "TF" || flagName == "tf") val = Script::Flag::GetTF();
+                    else if (flagName == "AF" || flagName == "af") val = Script::Flag::GetAF();
+                    else if (flagName == "DF" || flagName == "df") val = Script::Flag::GetDF();
+                    else if (flagName == "IF" || flagName == "if") val = Script::Flag::GetIF();
+                    else {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Unknown flag");
                         continue;
                     }
-                    duint cflags = Script::Register::GetCFLAGS();
-                    bool val = (cflags >> bit) & 1;
                     sendHttpResponse(clientSocket, 200, "text/plain", val ? "true" : "false");
                 }
                 else if (path == "/Flag/Set") {
@@ -1035,19 +913,20 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                     std::string vLower = valueStr;
                     std::transform(vLower.begin(), vLower.end(), vLower.begin(), ::tolower);
                     bool value = (vLower == "true" || vLower == "1");
-                    std::string flagLower = flagName;
-                    std::transform(flagLower.begin(), flagLower.end(), flagLower.begin(), ::tolower);
-                    int bit = getFlagBitIndex(flagLower);
-                    if (bit < 0) {
+                    bool success = false;
+                    if (flagName == "ZF" || flagName == "zf") success = Script::Flag::SetZF(value);
+                    else if (flagName == "OF" || flagName == "of") success = Script::Flag::SetOF(value);
+                    else if (flagName == "CF" || flagName == "cf") success = Script::Flag::SetCF(value);
+                    else if (flagName == "PF" || flagName == "pf") success = Script::Flag::SetPF(value);
+                    else if (flagName == "SF" || flagName == "sf") success = Script::Flag::SetSF(value);
+                    else if (flagName == "TF" || flagName == "tf") success = Script::Flag::SetTF(value);
+                    else if (flagName == "AF" || flagName == "af") success = Script::Flag::SetAF(value);
+                    else if (flagName == "DF" || flagName == "df") success = Script::Flag::SetDF(value);
+                    else if (flagName == "IF" || flagName == "if") success = Script::Flag::SetIF(value);
+                    else {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Unknown flag");
                         continue;
                     }
-                    duint cflags = Script::Register::GetCFLAGS();
-                    if (value)
-                        cflags |= (duint)1 << bit;
-                    else
-                        cflags &= ~((duint)1 << bit);
-                    bool success = Script::Register::SetCFLAGS(cflags);
                     if (success)
                         GuiUpdateRegisterView();
                     sendHttpResponse(clientSocket, success ? 200 : 500, "text/plain",
@@ -1095,27 +974,44 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                         sendHttpResponse(clientSocket, 404, "text/plain", "Pattern not found");
                     }
                 }
-                
                 else if (path == "/Misc/ParseExpression") {
                     std::string expression = queryParams["expression"];
                     if (expression.empty() && !body.empty()) {
                         expression = body;
                     }
-                    
+                    expression = urlDecode(expression);
+                    trimParam(expression);
+
                     if (expression.empty()) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Missing expression parameter");
                         continue;
                     }
-                    
+
+                    const bool wantJson = (queryParams["format"] == "json");
                     duint value = 0;
-                    bool success = Script::Misc::ParseExpression(expression.c_str(), &value);
-                    
-                    if (success) {
+                    const bool success = Script::Misc::ParseExpression(expression.c_str(), &value);
+
+                    if (!success) {
+                        _plugin_logprintf(
+                            "[HTTP /Misc/ParseExpression] failed (see DBG log). expr: %s\n",
+                            expression.c_str());
+                        if (wantJson) {
+                            sendHttpResponse(clientSocket, 500, "application/json",
+                                "{\"ok\":false,\"error\":\"Failed to parse expression\"}");
+                        } else {
+                            sendHttpResponse(clientSocket, 500, "text/plain", "Failed to parse expression");
+                        }
+                        continue;
+                    }
+
+                    if (wantJson) {
+                        std::stringstream ss;
+                        ss << "{\"ok\":true,\"value\":\"0x" << std::hex << value << "\"}";
+                        sendHttpResponse(clientSocket, 200, "application/json", ss.str());
+                    } else {
                         std::stringstream ss;
                         ss << "0x" << std::hex << value;
                         sendHttpResponse(clientSocket, 200, "text/plain", ss.str());
-                    } else {
-                        sendHttpResponse(clientSocket, 500, "text/plain", "Failed to parse expression");
                     }
                 }
                 else if (path == "/Misc/RemoteGetProcAddress") {
@@ -1141,7 +1037,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                     if (addrStr.empty() && !body.empty()) {
                         addrStr = body;
                     }
-                    _plugin_logprintf("MemoryBase endpoint called with addr: %s\n", addrStr.c_str());
                     // Convert string address to duint
                     duint addr = 0;
                     try {
@@ -1151,12 +1046,9 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Invalid address format");
                         continue;
                     }
-                    _plugin_logprintf("Converted address: " FMT_DUINT_HEX "\n", DUINT_CAST_PRINTF(addr));
-                    
                     // Get the base address and size
                     duint size = 0;
                     duint baseAddr = DbgMemFindBaseAddr(addr, &size);
-                    _plugin_logprintf("Base address found: " FMT_DUINT_HEX ", size: " FMT_DUINT_DEC "\n", DUINT_CAST_PRINTF(baseAddr), DUSIZE_CAST_PRINTF(size));
                     if (baseAddr == 0) {
                         sendHttpResponse(clientSocket, 404, "text/plain", "No module found for this address");
                     }
@@ -1252,9 +1144,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                     size_t totalCount = symbolList.count;
                     Script::Symbol::SymbolInfo* symbols = (Script::Symbol::SymbolInfo*)symbolList.data;
                     
-                    _plugin_logprintf("SymbolEnum: module='%s', total symbols from GetList = %llu, offset=%d, limit=%d\n",
-                        moduleFilterDecoded.c_str(), (unsigned long long)totalCount, offset, limit);
-                    
                     // Build JSON response - filter to requested module only
                     std::stringstream jsonResponse;
                     
@@ -1314,10 +1203,7 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                     
                     // Free the list
                     BridgeFree(symbolList.data);
-                    
-                    _plugin_logprintf("SymbolEnum: returned %d symbols for '%s' (module total: %d)\n",
-                        emitted, moduleFilterDecoded.c_str(), filteredTotal);
-                    
+
                     sendHttpResponse(clientSocket, 200, "application/json", jsonResponse.str());
                 }
                 else if (path == "/GetThreadList") {
@@ -2193,16 +2079,11 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
                 
             }
             catch (const std::exception& e) {
-                // Exception in handling request
                 sendHttpResponse(clientSocket, 500, "text/plain", std::string("Internal Server Error: ") + e.what());
             }
         }
-        
-        // Close the client socket
         closesocket(clientSocket);
     }
-
-    // Clean up
     if (g_serverSocket != INVALID_SOCKET) {
         closesocket(g_serverSocket);
         g_serverSocket = INVALID_SOCKET;
@@ -2212,17 +2093,12 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
     return 0;
 }
 
-// Function to read the HTTP request
 std::string readHttpRequest(SOCKET clientSocket) {
     std::string request;
     char buffer[MAX_REQUEST_SIZE];
     int bytesReceived;
-    
-    // Set socket to blocking mode to receive full request
     u_long mode = 0;
     ioctlsocket(clientSocket, FIONBIO, &mode);
-    
-    // Receive data
     bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
     
     if (bytesReceived > 0) {
@@ -2233,17 +2109,13 @@ std::string readHttpRequest(SOCKET clientSocket) {
     return request;
 }
 
-// Function to parse an HTTP request
 void parseHttpRequest(const std::string& request, std::string& method, std::string& path, std::string& query, std::string& body) {
-    // Parse the request line
     size_t firstLineEnd = request.find("\r\n");
     if (firstLineEnd == std::string::npos) {
         return;
     }
     
     std::string requestLine = request.substr(0, firstLineEnd);
-    
-    // Extract method and URL
     size_t methodEnd = requestLine.find(' ');
     if (methodEnd == std::string::npos) {
         return;
@@ -2257,8 +2129,6 @@ void parseHttpRequest(const std::string& request, std::string& method, std::stri
     }
     
     std::string url = requestLine.substr(methodEnd + 1, urlEnd - methodEnd - 1);
-    
-    // Split URL into path and query
     size_t queryStart = url.find('?');
     if (queryStart != std::string::npos) {
         path = url.substr(0, queryStart);
@@ -2267,20 +2137,14 @@ void parseHttpRequest(const std::string& request, std::string& method, std::stri
         path = url;
         query = "";
     }
-    
-    // Find the end of headers and start of body
     size_t headersEnd = request.find("\r\n\r\n");
     if (headersEnd == std::string::npos) {
         return;
     }
-    
-    // Extract body
     body = request.substr(headersEnd + 4);
 }
 
-// Function to send HTTP response
 void sendHttpResponse(SOCKET clientSocket, int statusCode, const std::string& contentType, const std::string& responseBody) {
-    // Prepare status line
     std::string statusText;
     switch (statusCode) {
         case 200: statusText = "OK"; break;
@@ -2288,8 +2152,6 @@ void sendHttpResponse(SOCKET clientSocket, int statusCode, const std::string& co
         case 500: statusText = "Internal Server Error"; break;
         default: statusText = "Unknown";
     }
-    
-    // Build the response
     std::stringstream response;
     response << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n";
     response << "Content-Type: " << contentType << "\r\n";
@@ -2297,13 +2159,10 @@ void sendHttpResponse(SOCKET clientSocket, int statusCode, const std::string& co
     response << "Connection: close\r\n";
     response << "\r\n";
     response << responseBody;
-    
-    // Send the response
     std::string responseStr = response.str();
     send(clientSocket, responseStr.c_str(), (int)responseStr.length(), 0);
 }
 
-// Parse query parameters from URL
 std::unordered_map<std::string, std::string> parseQueryParams(const std::string& query) {
     std::unordered_map<std::string, std::string> params;
     
@@ -2331,7 +2190,6 @@ std::unordered_map<std::string, std::string> parseQueryParams(const std::string&
     return params;
 }
 
-// Command callback for toggling HTTP server
 bool cbEnableHttpServer(int argc, char* argv[]) {
     if (g_httpServerRunning) {
         _plugin_logputs("Stopping HTTP server...");
@@ -2348,7 +2206,6 @@ bool cbEnableHttpServer(int argc, char* argv[]) {
     return true;
 }
 
-// Command callback for changing HTTP server port
 bool cbSetHttpPort(int argc, char* argv[]) {
     if (argc < 2) {
         _plugin_logputs("Usage: httpport [port_number]");
@@ -2386,7 +2243,6 @@ bool cbSetHttpPort(int argc, char* argv[]) {
     return true;
 }
 
-// Register plugin commands
 void registerCommands() {
     _plugin_registercommand(g_pluginHandle, "httpserver", cbEnableHttpServer, 
                            "Toggle HTTP server on/off");
