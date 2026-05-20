@@ -219,7 +219,7 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
     }
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     serverAddr.sin_port = htons((u_short)g_httpPort);
     if (bind(g_serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
         _plugin_logprintf("Bind failed with error: %d\n", WSAGetLastError());
@@ -233,8 +233,8 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
         WSACleanup();
         return 1;
     }
-    
-    _plugin_logprintf("HTTP server started at http://localhost:%d/\n", g_httpPort);
+
+    _plugin_logprintf("HTTP server started at http://0.0.0.0:%d/\n", g_httpPort);
     u_long mode = 1;
     ioctlsocket(g_serverSocket, FIONBIO, &mode);
     while (g_httpServerRunning) {
