@@ -136,6 +136,12 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     SUFFIX "${PLUGIN_EXT}"
 )
 
+# Static runtime: no dependency on MSVC redistributable DLLs
+if(MSVC)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     target_compile_definitions(${PROJECT_NAME} PRIVATE _WIN64)
 else()
