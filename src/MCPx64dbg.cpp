@@ -277,6 +277,7 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
     SOCKET clientSocket = *(SOCKET*)lpParam;
     delete (SOCKET*)lpParam;
 
+    do {
         std::string requestData = readHttpRequest(clientSocket);
         if (!requestData.empty()) {
             std::string method, path, query, body;
@@ -2103,7 +2104,8 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
                 sendHttpResponse(clientSocket, 500, "text/plain", std::string("Internal Server Error: ") + e.what());
             }
         }
-        closesocket(clientSocket);
+    } while(0);
+    closesocket(clientSocket);
     return 0;
 }
 
