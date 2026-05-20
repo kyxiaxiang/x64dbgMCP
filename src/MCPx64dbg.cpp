@@ -94,7 +94,7 @@ bool pluginInit(PLUG_INITSTRUCT* initStruct) {
     _plugin_logputs("x64dbg HTTP Server plugin loading...");
     registerCommands();
     if (startHttpServer()) {
-        _plugin_logprintf("x64dbg HTTP Server started on port %d\n", g_httpPort);
+        _plugin_logprintf("x64dbg HTTP Server started on port %d\n", g_httpPort.load());
     } else {
         _plugin_logputs("Failed to start HTTP server!");
     }
@@ -282,7 +282,7 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serverAddr.sin_port = htons((u_short)g_httpPort);
+    serverAddr.sin_port = htons((u_short)g_httpPort.load());
     if (bind(g_serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
         _plugin_logprintf("Bind failed with error: %d\n", WSAGetLastError());
         closesocket(g_serverSocket);
@@ -296,7 +296,7 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
         return 1;
     }
 
-    _plugin_logprintf("HTTP server started at http://0.0.0.0:%d/\n", g_httpPort);
+    _plugin_logprintf("HTTP server started at http://0.0.0.0:%d/\n", g_httpPort.load());
     u_long mode = 1;
     ioctlsocket(g_serverSocket, FIONBIO, &mode);
     while (g_httpServerRunning) {
@@ -623,7 +623,8 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Invalid address format");
                         continue;
                     }
-                    bool ok = Script::Memory::SetRights(addr, rights.c_str());
+                    std::string cmd = "setpagerights " + addrStr + ", " + rights;
+                    bool ok = DbgCmdExecDirect(cmd.c_str());
                     std::string body = ok ? "{\"success\":true}" : "{\"success\":false}";
                     sendHttpResponse(clientSocket, 200, "application/json", body);
                 }
@@ -2209,7 +2210,7 @@ bool cbEnableHttpServer(int argc, char* argv[]) {
     } else {
         _plugin_logputs("Starting HTTP server...");
         if (startHttpServer()) {
-            _plugin_logprintf("HTTP server started on port %d\n", g_httpPort);
+            _plugin_logprintf("HTTP server started on port %d\n", g_httpPort.load());
         } else {
             _plugin_logputs("Failed to start HTTP server");
         }
@@ -2243,12 +2244,12 @@ bool cbSetHttpPort(int argc, char* argv[]) {
         _plugin_logputs("Restarting HTTP server with new port...");
         stopHttpServer();
         if (startHttpServer()) {
-            _plugin_logprintf("HTTP server restarted on port %d\n", g_httpPort);
+            _plugin_logprintf("HTTP server restarted on port %d\n", g_httpPort.load());
         } else {
             _plugin_logputs("Failed to restart HTTP server");
         }
     } else {
-        _plugin_logprintf("HTTP port set to %d\n", g_httpPort);
+        _plugin_logprintf("HTTP port set to %d\n", g_httpPort.load());
     }
     
     return true;
