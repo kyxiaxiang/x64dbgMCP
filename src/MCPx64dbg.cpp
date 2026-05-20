@@ -204,6 +204,8 @@ std::string escapeJsonString(const char* str) {
     return result;
 }
 
+DWORD WINAPI HandleClientThread(LPVOID lpParam);
+
 DWORD WINAPI HttpServerThread(LPVOID lpParam) {
     WSADATA wsaData;
     int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -252,6 +254,29 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
             Sleep(100);
             continue;
         }
+        {
+            SOCKET* pSock = new SOCKET(clientSocket);
+            HANDLE hThread = CreateThread(NULL, 0, HandleClientThread, pSock, 0, NULL);
+            if (hThread) {
+                CloseHandle(hThread);
+            } else {
+                delete pSock;
+                closesocket(clientSocket);
+            }
+        }
+    }
+    if (g_serverSocket != INVALID_SOCKET) {
+        closesocket(g_serverSocket);
+        g_serverSocket = INVALID_SOCKET;
+    }
+    WSACleanup();
+    return 0;
+}
+
+DWORD WINAPI HandleClientThread(LPVOID lpParam) {
+    SOCKET clientSocket = *(SOCKET*)lpParam;
+    delete (SOCKET*)lpParam;
+
         std::string requestData = readHttpRequest(clientSocket);
         if (!requestData.empty()) {
             std::string method, path, query, body;
@@ -2079,13 +2104,6 @@ DWORD WINAPI HttpServerThread(LPVOID lpParam) {
             }
         }
         closesocket(clientSocket);
-    }
-    if (g_serverSocket != INVALID_SOCKET) {
-        closesocket(g_serverSocket);
-        g_serverSocket = INVALID_SOCKET;
-    }
-
-    WSACleanup();
     return 0;
 }
 
