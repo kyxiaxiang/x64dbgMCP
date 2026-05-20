@@ -27,6 +27,7 @@
 #include <vector>
 #include <unordered_map>
 #include <sstream>
+#include <atomic>
 #include <mutex>
 #include <algorithm>
 #include <cctype>
@@ -55,7 +56,7 @@
 
 int g_pluginHandle;
 HANDLE g_httpServerThread = NULL;
-bool g_httpServerRunning = false;
+std::atomic<bool> g_httpServerRunning(false);
 int g_httpPort = DEFAULT_PORT;
 std::mutex g_httpMutex;
 SOCKET g_serverSocket = INVALID_SOCKET;
@@ -965,9 +966,9 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
                     
                     duint start = 0, size = 0;
 
-                    Pattern.erase(std::remove_if(pattern.begin(), pattern.end(), 
-                                  [](unsigned char c) { return std::isspace(c); }), 
-                    Pattern.end());
+                    Pattern.erase(std::remove_if(Pattern.begin(), Pattern.end(),
+                                  [](unsigned char c) { return std::isspace(c); }),
+                                  Pattern.end());
 
                     try {
                         if (startStr.substr(0, 2) == "0x") {
@@ -2098,7 +2099,9 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
                     BridgeFree(handleList.data);
                     sendHttpResponse(clientSocket, 200, "application/json", ss.str());
                 }
-                
+                else {
+                    sendHttpResponse(clientSocket, 404, "text/plain", "Unknown endpoint: " + path);
+                }
             }
             catch (const std::exception& e) {
                 sendHttpResponse(clientSocket, 500, "text/plain", std::string("Internal Server Error: ") + e.what());
