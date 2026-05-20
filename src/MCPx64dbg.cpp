@@ -54,10 +54,20 @@
 #define DEFAULT_PORT 8888
 #define MAX_REQUEST_SIZE 8192
 
+#ifndef MAX_STRING_SIZE
+#define MAX_STRING_SIZE  512
+#endif
+#ifndef MAX_LABEL_SIZE
+#define MAX_LABEL_SIZE   256
+#endif
+#ifndef MAX_COMMENT_SIZE
+#define MAX_COMMENT_SIZE 512
+#endif
+
 int g_pluginHandle;
 HANDLE g_httpServerThread = NULL;
 std::atomic<bool> g_httpServerRunning(false);
-int g_httpPort = DEFAULT_PORT;
+std::atomic<int> g_httpPort(DEFAULT_PORT);
 std::mutex g_httpMutex;
 SOCKET g_serverSocket = INVALID_SOCKET;
 
@@ -115,6 +125,45 @@ extern "C" __declspec(dllexport) void plugsetup(PLUG_SETUPSTRUCT* setupStruct) {
     pluginSetup();
 }
 
+static bool parseRegisterName(const std::string& name, Script::Register::RegisterEnum& reg) {
+    const std::string n = name.size() > 0 && name[0] >= 'a' ?
+        std::string(name.begin(), name.end()) : name;
+    // build uppercase copy for comparison
+    std::string u = name;
+    for (auto& c : u) c = (char)toupper((unsigned char)c);
+
+    if (u == "EAX") reg = Script::Register::EAX;
+    else if (u == "EBX") reg = Script::Register::EBX;
+    else if (u == "ECX") reg = Script::Register::ECX;
+    else if (u == "EDX") reg = Script::Register::EDX;
+    else if (u == "ESI") reg = Script::Register::ESI;
+    else if (u == "EDI") reg = Script::Register::EDI;
+    else if (u == "EBP") reg = Script::Register::EBP;
+    else if (u == "ESP") reg = Script::Register::ESP;
+    else if (u == "EIP") reg = Script::Register::EIP;
+#ifdef _WIN64
+    else if (u == "RAX") reg = Script::Register::RAX;
+    else if (u == "RBX") reg = Script::Register::RBX;
+    else if (u == "RCX") reg = Script::Register::RCX;
+    else if (u == "RDX") reg = Script::Register::RDX;
+    else if (u == "RSI") reg = Script::Register::RSI;
+    else if (u == "RDI") reg = Script::Register::RDI;
+    else if (u == "RBP") reg = Script::Register::RBP;
+    else if (u == "RSP") reg = Script::Register::RSP;
+    else if (u == "RIP") reg = Script::Register::RIP;
+    else if (u == "R8")  reg = Script::Register::R8;
+    else if (u == "R9")  reg = Script::Register::R9;
+    else if (u == "R10") reg = Script::Register::R10;
+    else if (u == "R11") reg = Script::Register::R11;
+    else if (u == "R12") reg = Script::Register::R12;
+    else if (u == "R13") reg = Script::Register::R13;
+    else if (u == "R14") reg = Script::Register::R14;
+    else if (u == "R15") reg = Script::Register::R15;
+#endif
+    else return false;
+    return true;
+}
+
 bool startHttpServer() {
     std::lock_guard<std::mutex> lock(g_httpMutex);
     if (g_httpServerRunning) {
@@ -139,11 +188,21 @@ void stopHttpServer() {
             g_serverSocket = INVALID_SOCKET;
         }
         if (g_httpServerThread != NULL) {
-            WaitForSingleObject(g_httpServerThread, 1000);
+            WaitForSingleObject(g_httpServerThread, 3000);
             CloseHandle(g_httpServerThread);
             g_httpServerThread = NULL;
         }
     }
+}
+
+static bool parseHexAddress(const std::string& s, duint& out) {
+    try {
+        if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+            out = (duint)std::stoull(s.substr(2), nullptr, 16);
+        else
+            out = (duint)std::stoull(s, nullptr, 16);
+        return true;
+    } catch (...) { return false; }
 }
 
 std::string urlDecode(const std::string& str) {
@@ -400,45 +459,10 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
                         continue;
                     }
                     Script::Register::RegisterEnum reg;
-                    if (regName == "EAX" || regName == "eax") reg = Script::Register::EAX;
-                    else if (regName == "EBX" || regName == "ebx") reg = Script::Register::EBX;
-                    else if (regName == "ECX" || regName == "ecx") reg = Script::Register::ECX;
-                    else if (regName == "EDX" || regName == "edx") reg = Script::Register::EDX;
-                    else if (regName == "ESI" || regName == "esi") reg = Script::Register::ESI;
-                    else if (regName == "EDI" || regName == "edi") reg = Script::Register::EDI;
-                    else if (regName == "EBP" || regName == "ebp") reg = Script::Register::EBP;
-                    else if (regName == "ESP" || regName == "esp") reg = Script::Register::ESP;
-                    else if (regName == "EIP" || regName == "eip") reg = Script::Register::EIP;
-#ifdef _WIN64
-                    else if (regName == "RAX" || regName == "rax") reg = Script::Register::RAX;
-                    else if (regName == "RBX" || regName == "rbx") reg = Script::Register::RBX;
-                    else if (regName == "RCX" || regName == "rcx") reg = Script::Register::RCX;
-                    else if (regName == "RDX" || regName == "rdx") reg = Script::Register::RDX;
-                    else if (regName == "RSI" || regName == "rsi") reg = Script::Register::RSI;
-                    else if (regName == "RDI" || regName == "rdi") reg = Script::Register::RDI;
-                    else if (regName == "RBP" || regName == "rbp") reg = Script::Register::RBP;
-                    else if (regName == "RSP" || regName == "rsp") reg = Script::Register::RSP;
-                    else if (regName == "RIP" || regName == "rip") {
-#ifdef _WIN64
-                        reg = Script::Register::RIP;
-#else
-                        reg = Script::Register::EIP;
-#endif
-                    }
-                    else if (regName == "R8" || regName == "r8") reg = Script::Register::R8;
-                    else if (regName == "R9" || regName == "r9") reg = Script::Register::R9;
-                    else if (regName == "R10" || regName == "r10") reg = Script::Register::R10;
-                    else if (regName == "R11" || regName == "r11") reg = Script::Register::R11;
-                    else if (regName == "R12" || regName == "r12") reg = Script::Register::R12;
-                    else if (regName == "R13" || regName == "r13") reg = Script::Register::R13;
-                    else if (regName == "R14" || regName == "r14") reg = Script::Register::R14;
-                    else if (regName == "R15" || regName == "r15") reg = Script::Register::R15;
-#endif
-                    else {
+                    if (!parseRegisterName(regName, reg)) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Unknown register");
                         continue;
                     }
-                    
                     duint value = Script::Register::Get(reg);
                     std::stringstream ss;
                     ss << "0x" << std::hex << value;
@@ -452,45 +476,10 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
                         continue;
                     }
                     Script::Register::RegisterEnum reg;
-                    if (regName == "EAX" || regName == "eax") reg = Script::Register::EAX;
-                    else if (regName == "EBX" || regName == "ebx") reg = Script::Register::EBX;
-                    else if (regName == "ECX" || regName == "ecx") reg = Script::Register::ECX;
-                    else if (regName == "EDX" || regName == "edx") reg = Script::Register::EDX;
-                    else if (regName == "ESI" || regName == "esi") reg = Script::Register::ESI;
-                    else if (regName == "EDI" || regName == "edi") reg = Script::Register::EDI;
-                    else if (regName == "EBP" || regName == "ebp") reg = Script::Register::EBP;
-                    else if (regName == "ESP" || regName == "esp") reg = Script::Register::ESP;
-                    else if (regName == "EIP" || regName == "eip") reg = Script::Register::EIP;
-#ifdef _WIN64
-                    else if (regName == "RAX" || regName == "rax") reg = Script::Register::RAX;
-                    else if (regName == "RBX" || regName == "rbx") reg = Script::Register::RBX;
-                    else if (regName == "RCX" || regName == "rcx") reg = Script::Register::RCX;
-                    else if (regName == "RDX" || regName == "rdx") reg = Script::Register::RDX;
-                    else if (regName == "RSI" || regName == "rsi") reg = Script::Register::RSI;
-                    else if (regName == "RDI" || regName == "rdi") reg = Script::Register::RDI;
-                    else if (regName == "RBP" || regName == "rbp") reg = Script::Register::RBP;
-                    else if (regName == "RSP" || regName == "rsp") reg = Script::Register::RSP;
-                    else if (regName == "RIP" || regName == "rip") {
-#ifdef _WIN64
-                        reg = Script::Register::RIP;
-#else
-                        reg = Script::Register::EIP;
-#endif
-                    }
-                    else if (regName == "R8" || regName == "r8") reg = Script::Register::R8;
-                    else if (regName == "R9" || regName == "r9") reg = Script::Register::R9;
-                    else if (regName == "R10" || regName == "r10") reg = Script::Register::R10;
-                    else if (regName == "R11" || regName == "r11") reg = Script::Register::R11;
-                    else if (regName == "R12" || regName == "r12") reg = Script::Register::R12;
-                    else if (regName == "R13" || regName == "r13") reg = Script::Register::R13;
-                    else if (regName == "R14" || regName == "r14") reg = Script::Register::R14;
-                    else if (regName == "R15" || regName == "r15") reg = Script::Register::R15;
-#endif
-                    else {
+                    if (!parseRegisterName(regName, reg)) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Unknown register");
                         continue;
                     }
-                    
                     duint value = 0;
                     try {
                         if (valueStr.substr(0, 2) == "0x") {
@@ -597,17 +586,10 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
                     }
                     
                     duint addr = 0;
-                    try {
-                        if (addrStr.substr(0, 2) == "0x") {
-                            addr = std::stoull(addrStr.substr(2), nullptr, 16);
-                        } else {
-                            addr = std::stoull(addrStr, nullptr, 16);
-                        }
-                    } catch (const std::exception& e) {
+                    if (!parseHexAddress(addrStr, addr)) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Invalid address format");
                         continue;
                     }
-                    
                     bool isValid = Script::Memory::IsValidPtr(addr);
                     sendHttpResponse(clientSocket, 200, "text/plain", isValid ? "true" : "false");
                 }
@@ -619,23 +601,33 @@ DWORD WINAPI HandleClientThread(LPVOID lpParam) {
                     }
                     
                     duint addr = 0;
-                    try {
-                        if (addrStr.substr(0, 2) == "0x") {
-                            addr = std::stoull(addrStr.substr(2), nullptr, 16);
-                        } else {
-                            addr = std::stoull(addrStr, nullptr, 16);
-                        }
-                    } catch (const std::exception& e) {
+                    if (!parseHexAddress(addrStr, addr)) {
                         sendHttpResponse(clientSocket, 400, "text/plain", "Invalid address format");
                         continue;
                     }
-                    
                     unsigned int protect = Script::Memory::GetProtect(addr);
                     std::stringstream ss;
                     ss << "0x" << std::hex << protect;
                     sendHttpResponse(clientSocket, 200, "text/plain", ss.str());
                 }
                 
+                else if (path == "/Memory/SetPageRights") {
+                    std::string addrStr = queryParams["addr"];
+                    std::string rights  = queryParams["rights"];
+                    if (addrStr.empty() || rights.empty()) {
+                        sendHttpResponse(clientSocket, 400, "text/plain", "Missing addr or rights parameter");
+                        continue;
+                    }
+                    duint addr = 0;
+                    if (!parseHexAddress(addrStr, addr)) {
+                        sendHttpResponse(clientSocket, 400, "text/plain", "Invalid address format");
+                        continue;
+                    }
+                    bool ok = Script::Memory::SetRights(addr, rights.c_str());
+                    std::string body = ok ? "{\"success\":true}" : "{\"success\":false}";
+                    sendHttpResponse(clientSocket, 200, "application/json", body);
+                }
+
                 else if (path == "/Debug/Run") {
                     Script::Debug::Run();
                     sendHttpResponse(clientSocket, 200, "text/plain", "Debug run executed");

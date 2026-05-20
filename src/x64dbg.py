@@ -520,7 +520,7 @@ def PatternFindMem(start: str, size: str, pattern: str) -> str:
     
     Parameters:
         start: Start address (in hex format, e.g. "0x1000")
-        size: Size to search IN DECIMAL
+        size: Size to search, decimal or hex with 0x prefix
         pattern: Pattern to find (e.g. "48 8B 05 ?? ?? ?? ??")
     
     Returns:
